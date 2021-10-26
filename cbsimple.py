@@ -219,7 +219,7 @@ async def get_boss_status(bot, ev):
         status_str = f'''{clan_info['name']} 排名{clan_info['last_ranking']}
 当前进度：
 {stage_char}面{stage_num}阶段 {boss_info['lap_num']}周目{boss_num}王 {boss_info['name']}
-HP: {util.number_formatter(boss_hp)}/{util.number_formatter(boss_max_hp)} {boss_hp/boss_max_hp:.1%}
+HP: {number_formatter(boss_hp)}/{number_formatter(boss_max_hp)} {boss_hp/boss_max_hp:.1%}
 *查询结果存在延迟 请以游戏内为准'''
 
         await bot.send(ev, status_str)
