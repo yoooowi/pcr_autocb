@@ -189,7 +189,7 @@ async def update():
 
         # boss 状态
         boss_info = data['boss_info']
-        boss = get_boss_number(boss_info['total_life'])
+        boss = get_boss_number(boss_info['name'])
         lap = boss_info['lap_num']
         await update_boss(boss, lap, send_msg=True)
 
