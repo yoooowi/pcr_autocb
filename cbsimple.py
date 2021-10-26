@@ -32,6 +32,13 @@ def get_boss_info():
         data = json.loads(url.read().decode())
     return data
 
+def number_formatter(number:int):
+    if number < 10000:
+        return str(number)
+    
+    number = number/10000
+    return f'{number:.0f}万'
+    
 
 async def get_today_data(date:str=None):
     api = MEMBER_API if not date else  f'{MEMBER_API}&date={date}'
