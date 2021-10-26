@@ -38,7 +38,7 @@ def number_formatter(number:int):
     
     number = number/10000
     return f'{number:.0f}万'
-    
+
 
 async def get_today_data(date:str=None):
     api = MEMBER_API if not date else  f'{MEMBER_API}&date={date}'
@@ -106,9 +106,9 @@ async def update_boss(boss, lap_num, send_msg=False):
 
 
 
-def get_boss_number(hp):
-    boss_hp = get_boss_info()["boss_hp_to_num"]
-    return boss_hp[str(hp)]
+def get_boss_number(name):
+    boss_name = get_boss_info()["boss_name"]
+    return boss_name[name]
 
 def get_boss_stage(lap_num):
     if lap_num <= 3:
@@ -212,7 +212,7 @@ async def get_boss_status(bot, ev):
         clan_info = data['clan_info']
         boss_info = data['boss_info']
         stage_num, stage_char = get_boss_stage(boss_info['lap_num'])
-        boss_num = get_boss_number(boss_info['total_life'])
+        boss_num = get_boss_number(boss_info['name'])
         boss_hp = boss_info['current_life']
         boss_max_hp = boss_info['total_life']
         await update_boss(boss_num, boss_info['lap_num'])
