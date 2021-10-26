@@ -19,6 +19,8 @@ sv = Service('clanbattle_simple', enable_on_default=True, visible=True)
 
 slDao = SLDao()
 subDao = SubscribeDao()
+
+remote_config = True
 group_id = util.load_config(__file__)['group']
 
 on_tree = []
@@ -28,8 +30,12 @@ def cookie():
 
 
 def get_boss_info():
-    with urllib.request.urlopen("https://raw.githubusercontent.com/yoooowi/pcr_autocb/master/config.json") as url:
-        data = json.loads(url.read().decode())
+    if remote_config:
+        with urllib.request.urlopen("https://raw.githubusercontent.com/yoooowi/pcr_autocb/master/config.json") as url:
+            data = json.loads(url.read().decode())
+    else:
+        data = util.load_config(__file__)
+        
     return data
 
 def number_formatter(number:int):
