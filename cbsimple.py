@@ -107,8 +107,11 @@ async def update_boss(boss, lap_num, send_msg=False):
 
 
 def get_boss_number(name):
-    boss_name = get_boss_info()["boss_name"]
-    return boss_name[name]
+    try:
+        boss_name = get_boss_info()["boss_name"]
+        return boss_name[name]
+    except KeyError:
+        return '?'
 
 def get_boss_stage(lap_num):
     if lap_num <= 3:
