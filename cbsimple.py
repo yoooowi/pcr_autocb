@@ -255,7 +255,7 @@ async def subscirbe(bot, ev):
     match = ev['match']
     boss = int(match.group(1))
     if boss > 5 or boss < 1:
-        bot.send(ev, "不约，滚")
+        await bot.send(ev, "不约，滚")
         return
     uid = ev.user_id
     result = subDao.add_subscribe(uid, boss)
