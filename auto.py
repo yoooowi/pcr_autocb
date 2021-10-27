@@ -61,13 +61,16 @@ async def gettime(bot, ev):
 @sv.on_fullmatch('init', only_to_me=True)
 async def init(bot, ev):
     if not priv.check_priv(ev, priv.ADMIN):
-        return 
+        await bot.send(ev, '权限不足')
+
+    await bot.send(ev, '获取本期时间...')    
     ret = await gettime(bot, ev)
     if ret != 1:
         await bot.send(ev, '未获取到开始结束时间！')
         return
+    
     db = SubscribeDao()
-    ret = db.clear_subscriber()
+    ret = db.init()
     if ret == 1:
         await bot.send(ev, "预约表已重置")
     else:

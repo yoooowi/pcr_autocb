@@ -125,6 +125,15 @@ class SubscribeDao(SqliteDao):
             boss INT NOT NULL
             ''')
 
+    def init(self):
+        with self._connect() as conn:
+            try:
+                conn.execute("DELETE FROM subscribe where 1=1")
+                conn.execute("INSERT INTO subscribe (uid, boss) VALUES (-1, 1)")
+                return 1
+
+            except (sqlite3.DatabaseError) as e:
+                return 0
 
     def curr_boss(self):
         with self._connect() as conn:
@@ -157,7 +166,7 @@ class SubscribeDao(SqliteDao):
                 return 1
 
             except (sqlite3.DatabaseError) as e:
-                raise
+                return 0
 
     def add_subscribe(self, uid, boss):
         with self._connect() as conn:
@@ -166,7 +175,7 @@ class SubscribeDao(SqliteDao):
                 return 1
 
             except (sqlite3.DatabaseError) as e:
-                raise
+                return 0
 
     def update_boss(self, boss):
         with self._connect() as conn:
@@ -175,7 +184,7 @@ class SubscribeDao(SqliteDao):
                 return 1
 
             except (sqlite3.DatabaseError) as e:
-                raise
+                return 0
 
 class RecordDao(SqliteDao):
     def __init__(self, start=None, end=None):
