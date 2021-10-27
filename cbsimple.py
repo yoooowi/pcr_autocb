@@ -27,6 +27,7 @@ subDao = SubscribeDao()
 
 
 remote_config = True  # set False to use local config file.
+send_long_msg_as_pic = True
 group_id = util.load_config(__file__)['group']
 
 on_tree = []
@@ -203,8 +204,12 @@ async def get_stat(bot, ev, date=None):
                 reply.append('|'.join(v))
 
         # 绘图
-        img = await to_image(reply)
-        await bot.send(ev, MessageSegment.image(img), at_sender=True)
+        if send_long_msg_as_pic:
+            img = await to_image(reply)
+            await bot.send(ev, MessageSegment.image(img), at_sender=True)
+        else:
+            msg = "\n".join(reply)
+            await bot.send(ev, msg)
 
 
 def pil2b64(data):
@@ -231,7 +236,7 @@ async def to_image(msg_list):
 
     drow_height = 0
     for msg in msg_list:
-        x_drow_duanluo, x_drow_note_height, x_drow_line_height, x_drow_height = split_text(
+        x_drow_segment, x_drow_note_height, x_drow_line_height, x_drow_height = split_text(
             msg)
         drow_height += x_drow_height
 
@@ -240,10 +245,10 @@ async def to_image(msg_list):
     # 左上角开始
     x, y = 0, 0
     for msg in msg_list:
-        drow_duanluo, drow_note_height, drow_line_height, drow_height = split_text(
+        drow_segment, drow_note_height, drow_line_height, drow_height = split_text(
             msg)
-        for duanluo, line_count in drow_duanluo:
-            draw.text((x, y), duanluo, fill=(0, 0, 0), font=w65)
+        for segment, line_count in drow_segment:
+            draw.text((x, y), segment, fill=(0, 0, 0), font=w65)
             y += drow_line_height * line_count
 
     _x, _y = w65.getsize("囗")
@@ -258,21 +263,21 @@ def split_text(content):
     max_line_height, total_lines = 0, 0
     allText = []
     for text in content.split('\n'):
-        duanluo, line_height, line_count = get_duanluo(text)
+        segment, line_height, line_count = get_segment(text)
         max_line_height = max(line_height, max_line_height)
         total_lines += line_count
-        allText.append((duanluo, line_count))
+        allText.append((segment, line_count))
     line_height = max_line_height
     total_height = total_lines * line_height
     drow_height = total_lines * line_height
     return allText, total_height, line_height, drow_height
 
 
-def get_duanluo(text):
+def get_segment(text):
     txt = Image.new('RGBA', (600, 800), (255, 255, 255, 0))
     draw = ImageDraw.Draw(txt)
     # 所有文字的段落
-    duanluo = ""
+    segment = ""
     max_width = 1080
     # 宽度总和
     sum_width = 0
@@ -286,12 +291,12 @@ def get_duanluo(text):
         if sum_width > max_width:  # 超过预设宽度就修改段落 以及当前行数
             line_count += 1
             sum_width = 0
-            duanluo += '\n'
-        duanluo += char
+            segment += '\n'
+        segment += char
         line_height = max(height, line_height)
-    if not duanluo.endswith('\n'):
-        duanluo += '\n'
-    return duanluo, line_height, line_count
+    if not segment.endswith('\n'):
+        segment += '\n'
+    return segment, line_height, line_count
 
 
 @sv.on_fullmatch('状态')
