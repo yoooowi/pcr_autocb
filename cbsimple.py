@@ -7,17 +7,15 @@ import nonebot
 import random
 import urllib.request
 import json
-from hoshino import HoshinoBot, Service, util, priv, MessageSegment
-from .dao import DailyDao, MemberDao, SLDao, SubscribeDao, RecordDao
-from apscheduler.triggers.date import DateTrigger
+import os
 import base64
 import datetime
 import json
-import re
+from hoshino import HoshinoBot, Service, util, priv, MessageSegment
+from .dao import DailyDao, MemberDao, SLDao, SubscribeDao, RecordDao
+from apscheduler.triggers.date import DateTrigger
 from io import BytesIO
-from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-from bs4 import BeautifulSoup
 
 MEMBER_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-day-report/a&size=30"
 BOSS_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-day-report-collect/a"
@@ -27,7 +25,7 @@ sv = Service('clanbattle_simple', enable_on_default=True, visible=True)
 slDao = SLDao()
 subDao = SubscribeDao()
 
-remote_config = True
+remote_config = False
 group_id = util.load_config(__file__)['group']
 
 on_tree = []
@@ -217,8 +215,12 @@ def pil2b64(data):
 
 
 def get_font(size, w='85'):
-    return ImageFont.truetype(f'HYWenHei {w}W.ttf',
+    return ImageFont.truetype(get_path(f'HYWenHei {w}W.ttf'),
                               size=size)
+
+
+def get_path(*paths):
+    return os.path.join(os.path.dirname(__file__), *paths)
 
 
 w65 = get_font(26, w=65)
@@ -430,7 +432,6 @@ async def climb_tree(bot, ev):
     sv.logger.info(f"{uid}上树")
     await bot.send(ev, reply, at_sender=True)
 
-
 @sv.on_fullmatch('下树')
 async def off_tree(bot, ev):
     uid = ev.user_id
@@ -451,7 +452,6 @@ async def send_tree_notification(gid, uid, time):
         message=f"[CQ:at,qq={uid}]\n距离您报告上树已经过去了{time}分钟，请立刻使用SL或结算！"
     )
     sv.logger.info(f"提醒{uid}下树")
-
 
 @sv.on_fullmatch('查树')
 async def check_tree(bot: HoshinoBot, ev):
@@ -483,7 +483,6 @@ async def refs(bot, ev):
 分刀器
 >>> https://www.aikurumi.cn/'''
     await bot.send(ev, msg)
-
 
 @sv.on_rex(r'手动记录(\d\d\d\d-\d\d-\d\d)')
 async def manual_record(bot, ev):
@@ -539,7 +538,6 @@ async def register(bot, ev):
     else:
         await bot.send(ev, '注册失败')
 
-
 @sv.on_fullmatch('查看注册信息')
 async def get_register_info(bot, ev):
     uid = None
@@ -589,7 +587,6 @@ async def update_register(bot, ev):
         await bot.send(ev, '更新成功')
     else:
         await bot.send(ev, '更新失败')
-
 
 @sv.on_prefix('删除成员')
 async def delete_member(bot, ev):
