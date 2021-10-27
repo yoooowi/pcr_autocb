@@ -20,7 +20,7 @@ sv = Service('clanbattle_simple', enable_on_default=True, visible=True)
 slDao = SLDao()
 subDao = SubscribeDao()
 
-remote_config = True
+remote_config = True  # set False to use local config file.
 group_id = util.load_config(__file__)['group']
 
 on_tree = []
@@ -35,7 +35,6 @@ def get_boss_info():
             data = json.loads(url.read().decode())
     else:
         data = util.load_config(__file__)
-        
     return data
 
 def number_formatter(number:int):
@@ -285,7 +284,7 @@ async def yesterday_report(bot, ev):
     if not report:
         await bot.send(ev, f"没有找到{date}的记录")
     else:
-        report_str = f'''日期：{date.strftime('%Y-%m-%d')}
+        report_str = f'''日期：{date.strftime('%Y-%m-%d %H:%M:%S')}
 当日最终排名：{report['rank']}
 总出刀数：{report['recordCount']}/90
 总分数：{report['totalScore']}
