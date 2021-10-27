@@ -62,6 +62,7 @@ async def gettime(bot, ev):
 async def init(bot, ev):
     if not priv.check_priv(ev, priv.ADMIN):
         await bot.send(ev, '权限不足')
+        return
 
     await bot.send(ev, '获取本期时间...')    
     ret = await gettime(bot, ev)
