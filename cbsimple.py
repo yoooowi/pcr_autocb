@@ -5,12 +5,17 @@ import pytz
 import traceback
 import nonebot
 import random
-import urllib.request, json 
-from hoshino import HoshinoBot, Service, util, priv
+import urllib.request
+import json
+import os
+import base64
+import datetime
+import json
+from hoshino import HoshinoBot, Service, util, priv, MessageSegment
 from .dao import DailyDao, MemberDao, SLDao, SubscribeDao, RecordDao
 from apscheduler.triggers.date import DateTrigger
-
-
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 MEMBER_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-day-report/a&size=30"
 BOSS_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-day-report-collect/a"
@@ -20,10 +25,13 @@ sv = Service('clanbattle_simple', enable_on_default=True, visible=True)
 slDao = SLDao()
 subDao = SubscribeDao()
 
+
 remote_config = True  # set False to use local config file.
+send_long_msg_as_pic = True
 group_id = util.load_config(__file__)['group']
 
 on_tree = []
+
 
 def cookie():
     return util.load_config(__file__)["cookie"]
@@ -35,18 +43,20 @@ def get_boss_info():
             data = json.loads(url.read().decode())
     else:
         data = util.load_config(__file__)
+
     return data
 
-def number_formatter(number:int):
+
+def number_formatter(number: int):
     if number < 10000:
         return str(number)
-    
+
     number = number/10000
     return f'{number:.0f}万'
 
 
-async def get_today_data(date:str=None):
-    api = MEMBER_API if not date else  f'{MEMBER_API}&date={date}'
+async def get_today_data(date: str = None):
+    api = MEMBER_API if not date else f'{MEMBER_API}&date={date}'
     try:
         async with aiohttp.ClientSession(cookies=cookie()) as session:
             async with session.get(api) as resp:
@@ -64,6 +74,7 @@ async def get_collect():
     except:
         traceback.print_exc()
     return None
+
 
 async def get_start_end_date():
     data = await get_collect()
@@ -90,7 +101,7 @@ async def update_boss(boss, lap_num, send_msg=False):
             stage = get_boss_stage(lap_num)
             msg = f'{curr_boss}王已被击败\n' if curr_boss else 'BOSS状态更新\n'
             msg += f'当前进度：{stage[1]}面{stage[0]}阶段 {lap_num}周目{boss}王'
-            await bot.send_group_msg(group_id=group_id, message = msg)
+            await bot.send_group_msg(group_id=group_id, message=msg)
 
         # 处理挂树
         if len(on_tree) > 0:
@@ -109,14 +120,13 @@ async def update_boss(boss, lap_num, send_msg=False):
         await notify_subscribe(boss)
 
 
-
-
 def get_boss_number(name):
     try:
         boss_name = get_boss_info()["boss_name"]
         return boss_name[name]
     except KeyError:
         return '?'
+
 
 def get_boss_stage(lap_num):
     if lap_num <= 3:
@@ -134,21 +144,21 @@ async def notify_subscribe(boss):
     # 没有预约
     if not subscribers:
         return
-        
+
     # CQ码
     at_subscriber = ' '.join([f'[CQ:at,qq={qq}]' for qq in subscribers])
 
     bot = nonebot.get_bot()
-    await bot.send_group_msg(group_id=group_id, message= at_subscriber + f'\n你们预约的{boss}王出现了')
+    await bot.send_group_msg(group_id=group_id, message=at_subscriber + f'\n你们预约的{boss}王出现了')
 
     # 清除预约成员
     subDao.clear_subscriber(boss)
 
 
-
 @sv.on_fullmatch('今日出刀')
 async def get_today_stat(bot, ev):
     await get_stat(bot, ev)
+
 
 @sv.on_fullmatch('昨日出刀')
 async def get_yesterday_stat(bot, ev):
@@ -173,27 +183,120 @@ async def get_stat(bot, ev, date=None):
         sv.logger.error(f'API数据异常{data}@get_stat')
         await bot.send(ev, f'API数据异常\n{data}@get_stat')
 
-
     else:
         data = data['data']
         if len(data) == 0:
             await bot.send(ev, f"{'今日' if not date else date}没有出刀记录")
             return
-        stat = {3:[], 2.5:[], 2:[], 1.5:[], 1:[], 0.5:[], 0:[]}
+        stat = {3: [], 2.5: [], 2: [], 1.5: [], 1: [], 0.5: [], 0: []}
 
-        reply = f"以下是{'今日' if not date else date}的出刀次数统计：\n"
+        reply = []
+        reply.append(f"以下是{'今日' if not date else date}的出刀次数统计：")
         total = 0
         for member in data:
             number = member['number']
             total += number
             stat[number].append(member['name'])
-        reply += f'总计出刀：{total}'
+        reply.append(f'总计出刀：{total}')
         for k, v in stat.items():
             if len(v) > 0:
-                reply += f"\n----------\n以下是出了{k}刀的成员：\n"
-                reply += '|'.join(v)
-        await bot.send(ev, reply)
+                reply.append(f"\n----------\n以下是出了{k}刀的成员：")
+                reply.append('|'.join(v))
 
+        # 绘图
+        if send_long_msg_as_pic:
+            img = await to_image(reply)
+            await bot.send(ev, MessageSegment.image(img), at_sender=True)
+        else:
+            msg = "\n".join(reply)
+            await bot.send(ev, msg)
+
+
+def pil2b64(data):
+    bio = BytesIO()
+    data = data.convert("RGB")
+    data.save(bio, format='JPEG', quality=80)
+    base64_str = base64.b64encode(bio.getvalue()).decode()
+    return 'base64://' + base64_str
+
+
+def get_font(size, w='85'):
+    return ImageFont.truetype(get_path(f'HYWenHei {w}W.ttf'),
+                              size=size)
+
+
+def get_path(*paths):
+    return os.path.join(os.path.dirname(__file__), *paths)
+
+
+w65 = get_font(26, w=65)
+
+
+async def to_image(msg_list):
+
+    drow_height = 0
+    for msg in msg_list:
+        x_drow_segment, x_drow_note_height, x_drow_line_height, x_drow_height = split_text(
+            msg)
+        drow_height += x_drow_height
+
+    im = Image.new("RGB", (1080, drow_height), '#f9f6f2')
+    draw = ImageDraw.Draw(im)
+    # 左上角开始
+    x, y = 0, 0
+    for msg in msg_list:
+        drow_segment, drow_note_height, drow_line_height, drow_height = split_text(
+            msg)
+        for segment, line_count in drow_segment:
+            draw.text((x, y), segment, fill=(0, 0, 0), font=w65)
+            y += drow_line_height * line_count
+
+    _x, _y = w65.getsize("囗")
+    padding = (_x, _y, _x, _y)
+    im = ImageOps.expand(im, padding, '#f9f6f2')
+
+    return pil2b64(im)
+
+
+def split_text(content):
+    # 按规定宽度分组
+    max_line_height, total_lines = 0, 0
+    allText = []
+    for text in content.split('\n'):
+        segment, line_height, line_count = get_segment(text)
+        max_line_height = max(line_height, max_line_height)
+        total_lines += line_count
+        allText.append((segment, line_count))
+    line_height = max_line_height
+    total_height = total_lines * line_height
+    drow_height = total_lines * line_height
+    return allText, total_height, line_height, drow_height
+
+
+def get_segment(text):
+    txt = Image.new('RGBA', (600, 800), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(txt)
+    # 所有文字的段落
+    segment = ""
+    max_width = 1080
+    # 宽度总和
+    sum_width = 0
+    # 几行
+    line_count = 1
+    # 行高
+    line_height = 0
+    for char in text:
+        width, height = draw.textsize(char, w65)
+        sum_width += width
+        if sum_width > max_width:  # 超过预设宽度就修改段落 以及当前行数
+            line_count += 1
+            sum_width = 0
+            segment += '\n'
+        segment += char
+        line_height = max(height, line_height)
+    if not segment.endswith('\n'):
+        segment += '\n'
+    return segment, line_height, line_count
 
 
 @sv.on_fullmatch('状态')
@@ -215,7 +318,6 @@ async def get_boss_status(bot, ev):
         if 'day_list' not in data or date not in data['day_list']:
             await bot.send(ev, "现在似乎不是会战期间")
             return
-        
 
         clan_info = data['clan_info']
         boss_info = data['boss_info']
@@ -233,7 +335,6 @@ HP: {number_formatter(boss_hp)}/{number_formatter(boss_max_hp)} {boss_hp/boss_ma
         await bot.send(ev, status_str)
 
 
-
 @sv.on_fullmatch(('sl', 'SL', "Sl"))
 async def record_sl(bot, ev):
     result = slDao.add_sl(ev.user_id)
@@ -244,7 +345,8 @@ async def record_sl(bot, ev):
     else:
         await bot.send(ev, '数据库错误 请查看log')
 
-@sv.on_fullmatch(('sl?','SL?','sl？', 'SL？'))
+
+@sv.on_fullmatch(('sl?', 'SL?', 'sl？', 'SL？'))
 async def has_sl(bot, ev):
     result = slDao.check_sl(ev.user_id)
     if result == 0:
@@ -273,12 +375,14 @@ async def subscirbe(bot, ev):
     else:
         await bot.send(ev, '预约失败', at_sender=True)
 
+
 @sv.on_fullmatch('昨日日报')
 async def yesterday_report(bot, ev):
     now = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
     if now.hour < 5:
         now -= datetime.timedelta(days=1)
-    date = now.replace(hour=4, minute=59, second=59, microsecond=0, tzinfo=None)
+    date = now.replace(hour=4, minute=59, second=59,
+                       microsecond=0, tzinfo=None)
     db = DailyDao()
     report = db.get_day_report(date)
     if not report:
@@ -294,7 +398,7 @@ async def yesterday_report(bot, ev):
 
 
 @sv.on_rex(r'^[上挂]树\s*(\d*)$')
-async def climb_tree(bot, ev): 
+async def climb_tree(bot, ev):
     uid = ev.user_id
     if uid in on_tree:
         await bot.send(ev, "您已经在树上了", at_sender=True)
@@ -319,7 +423,7 @@ async def climb_tree(bot, ev):
         reply = f"上树成功，将在{time}分钟后提醒您下树"
 
     trigger = DateTrigger(
-        run_date = datetime.datetime.now() + datetime.timedelta(minutes=time)
+        run_date=datetime.datetime.now() + datetime.timedelta(minutes=time)
     )
     id = str(uid)
     nonebot.scheduler.add_job(
@@ -340,22 +444,23 @@ async def off_tree(bot, ev):
     if uid not in on_tree:
         await bot.send(ev, "您似乎不在树上", at_sender=True)
         return
-    
+
     id = str(uid)
     nonebot.scheduler.remove_job(id)
     on_tree.remove(uid)
     sv.logger.info(f"{uid}主动下树")
     await bot.send(ev, "下树成功", at_sender=True)
 
+
 async def send_tree_notification(gid, uid, time):
     await nonebot.get_bot().send_group_msg(
         group_id=gid,
         message=f"[CQ:at,qq={uid}]\n距离您报告上树已经过去了{time}分钟，请立刻使用SL或结算！"
-        )
+    )
     sv.logger.info(f"提醒{uid}下树")
 
 @sv.on_fullmatch('查树')
-async def check_tree(bot:HoshinoBot, ev):
+async def check_tree(bot: HoshinoBot, ev):
     if len(on_tree) == 0:
         await bot.send(ev, "目前树上空空如也")
         return
@@ -364,10 +469,11 @@ async def check_tree(bot:HoshinoBot, ev):
         reply = f'树上目前有{len(on_tree)}只🐒'
     else:
         reply = f'树上目前有{len(on_tree)}人'
-    
+
     for uid in on_tree:
         info = await bot.get_group_member_info(group_id=group_id, user_id=uid)
-        name = info['card'] if info['card'] and len(info['card']) > 0 else info['nickname']
+        name = info['card'] if info['card'] and len(
+            info['card']) > 0 else info['nickname']
         reply += f'\n{name}'
     await bot.send(ev, reply)
 
@@ -398,7 +504,7 @@ async def manual_record(bot, ev):
         sv.logger.error(f'API数据异常{data}@manual_record')
     else:
         data = data['data']
-        db = RecordDao(start_date.replace('-', ''), end_date.replace('-',''))
+        db = RecordDao(start_date.replace('-', ''), end_date.replace('-', ''))
         try:
             db.add_record(data)
             sv.logger.info("记录成功")
@@ -423,8 +529,7 @@ async def register(bot, ev):
             return
     if name is None or len(name) == 0:
         await bot.send(ev, '请提供游戏昵称')
-        return 
-
+        return
 
     db = MemberDao()
 
@@ -451,7 +556,7 @@ async def get_register_info(bot, ev):
         if not priv.check_priv(ev, priv.SUPERUSER):
             await bot.send(ev, '为他人注册需要群主权限')
             return
-    
+
     db = MemberDao()
     name = db.get_name_from_qq(uid)
     if not name:
@@ -477,8 +582,7 @@ async def update_register(bot, ev):
             return
     if name is None:
         await bot.send(ev, '请提供游戏昵称')
-        return 
-
+        return
 
     db = MemberDao()
     if db.get_name_from_qq(uid) is None:
@@ -495,7 +599,6 @@ async def delete_member(bot, ev):
     if not priv.check_priv(ev, priv.SUPERUSER):
         await bot.send(ev, "权限不足")
         return
-
 
     uid = None
     for m in ev['message']:
@@ -515,7 +618,7 @@ async def delete_member(bot, ev):
     name = db.get_name_from_qq(uid)
     if not name:
         await bot.send(ev, '未找到注册信息')
-        return 
+        return
 
     if db.leave(uid) == 1:
         await bot.send(ev, f'删除{name}成功')
