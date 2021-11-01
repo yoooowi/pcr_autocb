@@ -87,92 +87,99 @@ async def bossupdater():
         await update()
 
 @sv.scheduled_job('cron', hour = 4, minute=58)
-async def get_daily_report(force = False):
+async def get_daily_report():
     now_date = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d')
-    if not force and (not start_date or not end_date or now_date < start_date or now_date > end_date):
+    if not start_date or not end_date or now_date < start_date or now_date > end_date:
         pass # 不在会战期间
     
     else:
-        data = None
-        member_data = None
-        fail_count = 0
-
-        while fail_count < 3 and not data:
-            data = await get_collect()
-            fail_count += 1
-
-        fail_count = 0
-
-        while fail_count < 3 and not member_data:
-            member_data = await get_today_data()
-            fail_count += 1
-
-
-        if not data or len(data) == 0 or not member_data or len(member_data) == 0:
-            sv.logger.error('API访问失败@get_daily_report')
-        elif 'data' not in data or len(data['data']) == 0 or 'data' not in member_data:
-            sv.logger.error('API数据异常@get_daily_report')
-        else:
-            try:
-                data = data['data']
-                clan_info = data['clan_info']
-                now = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
-                month = int(now.strftime('%m'))
-                date = now.replace(hour=4, minute=59, second=59, microsecond=0, tzinfo=None)
-                rank = clan_info['last_ranking']
-
-                member_data = member_data['data']
-                recordCount = 0
-                totalScore = 0
-                totalDamage = 0
-                for member in member_data:
-                    recordCount += member['number']
-                    totalScore += member['score']
-                    totalDamage += member['damage']
-                
-                db = DailyDao()
-
-                db.add_day_report(month, date, rank, recordCount, totalScore, totalDamage)
-                sv.logger.log(AUTO_LOG_LEVEL, f'{date}日报已记录@get_daily_report')
-            except Exception as e:
-                bot = nonebot.get_bot()
-                sv.logger.error("自动保存日报失败")
+        await get_report()
 
 @sv.scheduled_job('cron', hour = 4, minute = 57)
-async def auto_record(force = False):
+async def auto_record():
     now_date = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d')
-    if not force and (not start_date or not end_date or now_date < start_date or now_date > end_date):
+    if not start_date or not end_date or now_date < start_date or now_date > end_date:
         pass # 不在会战期间
     
     else:
-        data = None
-        fail_count = 0
-
-        while fail_count < 3 and not data:
-            data = await get_today_data()
-            fail_count += 1
-
-        if not data or len(data) == 0:
-            sv.logger.error('API访问失败@auto_record')
-        elif 'data' not in data or len(data['data']) == 0:
-            sv.logger.error('API数据异常@auto_record')
-        else:
-            data = data['data']
-            db = RecordDao(start_date.replace('-', ''), end_date.replace('-',''))
-            try:
-                db.add_record(data)
-                sv.logger.log(AUTO_LOG_LEVEL, f'{now_date} 前一天的出刀已记录@auto_record()')
-            except Exception as e:
-                bot = nonebot.get_bot()
-                sv.logger.error('自动保存出刀记录失败')
-
+        await get_record()
 
 @sv.scheduled_job('cron', hour = 0, minute = 10)
 async def lat_day_record():
     now_date = (datetime.datetime.now(pytz.timezone('Asia/Shanghai')) - datetime.timedelta(minutes=20)).strftime('%Y-%m-%d')
     if now_date == end_date:
-        await auto_record(force = True)
-        await get_daily_report(force = True)
+        await get_report()
+        await get_record()
+
+async def get_report():
+    data = None
+    member_data = None
+    fail_count = 0
+
+    while fail_count < 3 and not data:
+        data = await get_collect()
+        fail_count += 1
+
+    fail_count = 0
+
+    while fail_count < 3 and not member_data:
+        member_data = await get_today_data()
+        fail_count += 1
+
+
+    if not data or len(data) == 0 or not member_data or len(member_data) == 0:
+        sv.logger.error('API访问失败@get_daily_report')
+    elif 'data' not in data or len(data['data']) == 0 or 'data' not in member_data:
+        sv.logger.error('API数据异常@get_daily_report')
+    else:
+        try:
+            data = data['data']
+            clan_info = data['clan_info']
+            now = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
+            month = int(now.strftime('%m'))
+            date = now.replace(hour=4, minute=59, second=59, microsecond=0, tzinfo=None)
+            rank = clan_info['last_ranking']
+
+            member_data = member_data['data']
+            recordCount = 0
+            totalScore = 0
+            totalDamage = 0
+            for member in member_data:
+                recordCount += member['number']
+                totalScore += member['score']
+                totalDamage += member['damage']
+            
+            db = DailyDao()
+
+            db.add_day_report(month, date, rank, recordCount, totalScore, totalDamage)
+            sv.logger.log(AUTO_LOG_LEVEL, f'{date}日报已记录@get_daily_report')
+        except Exception as e:
+            bot = nonebot.get_bot()
+            sv.logger.error("自动保存日报失败")
+
+async def get_record():
+    date = (datetime.datetime.now(pytz.timezone('Asia/Shanghai')) - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+    data = None
+    fail_count = 0
+
+    while fail_count < 3 and not data:
+        data = await get_today_data()
+        fail_count += 1
+
+    if not data or len(data) == 0:
+        sv.logger.error('API访问失败@auto_record')
+    elif 'data' not in data or len(data['data']) == 0:
+        sv.logger.error('API数据异常@auto_record')
+    else:
+        data = data['data']
+        db = RecordDao(start_date.replace('-', ''), end_date.replace('-',''))
+        try:
+            db.add_record(data)
+            sv.logger.log(AUTO_LOG_LEVEL, f'{date} 的出刀已记录@auto_record()')
+        except Exception as e:
+            bot = nonebot.get_bot()
+            sv.logger.error('自动保存出刀记录失败')
+
 
 async def update():
     global log_flag
