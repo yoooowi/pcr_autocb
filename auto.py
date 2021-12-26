@@ -76,6 +76,7 @@ async def init(bot, ev):
         await bot.send(ev, "预约表已重置")
     else:
         await bot.send(ev, "预约表重置失败")
+    await update_boss_list(bot, ev)
 
 @sv.scheduled_job('interval', minutes = 2)
 async def bossupdater():

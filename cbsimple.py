@@ -19,14 +19,13 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 MEMBER_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-day-report/a&size=30"
 BOSS_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-day-report-collect/a"
+LIST_API = "https://www.bigfun.cn/api/feweb?target=gzlj-clan-boss-report-collect/a"
 
 sv = Service('clanbattle_simple', enable_on_default=True, visible=True)
 
 slDao = SLDao()
 subDao = SubscribeDao()
 
-
-remote_config = True  # set False to use local config file.
 send_long_msg_as_pic = True
 group_id = util.load_config(__file__)['group']
 
@@ -38,13 +37,8 @@ def cookie():
 
 
 def get_boss_info():
-    if remote_config:
-        with urllib.request.urlopen("https://raw.githubusercontent.com/yoooowi/pcr_autocb/master/config.json") as url:
-            data = json.loads(url.read().decode())
-    else:
-        data = util.load_config(__file__)
-
-    return data
+    boss_name = util.load_config(__file__)['boss_name'] 
+    return boss_name
 
 
 def number_formatter(number: int):
@@ -70,6 +64,15 @@ async def get_collect():
     try:
         async with aiohttp.ClientSession(cookies=cookie()) as session:
             async with session.get(BOSS_API) as resp:
+                return await resp.json(content_type='application/json')
+    except:
+        traceback.print_exc()
+    return None
+
+async def get_boss_list():
+    try:
+        async with aiohttp.ClientSession(cookies=cookie()) as session:
+            async with session.get(LIST_API) as resp:
                 return await resp.json(content_type='application/json')
     except:
         traceback.print_exc()
@@ -122,7 +125,7 @@ async def update_boss(boss, lap_num, send_msg=False):
 
 def get_boss_number(name):
     try:
-        boss_name = get_boss_info()["boss_name"]
+        boss_name = get_boss_info()
         return boss_name[name]
     except KeyError:
         return '?'
@@ -489,6 +492,32 @@ async def refs(bot, ev):
 分刀器
 >>> https://www.aikurumi.cn/'''
     await bot.send(ev, msg)
+
+
+@sv.on_fullmatch('更新boss列表')
+async def update_boss_list(bot, ev):
+    data = await get_boss_list()
+    if not data or len(data) == 0:
+        sv.logger.error('API访问失败@update_boss_list')
+    elif 'data' not in data or len(data['data']) == 0:
+        sv.logger.error(f'API数据异常\n{data}@update_boss_list')
+    else:
+        data = data['data']
+        constellation = data['name']
+        boss_list = data['boss_list']
+        boss_dict = {boss['boss_name']:int(boss['id'][-1]) for boss in boss_list}
+
+        
+        #写入config.json
+        config = util.load_config(__file__)
+        config['boss_name'] = boss_dict
+        config_file = os.path.join(os.path.dirname(__file__), 'config.json')
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False)
+        
+        await bot.send(ev, f"已更新{constellation} BOSS 列表")
+
+
 
 @sv.on_rex(r'手动记录(\d\d\d\d-\d\d-\d\d)')
 async def manual_record(bot, ev):
