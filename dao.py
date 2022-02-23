@@ -1,14 +1,17 @@
+from plistlib import UID
 import sqlite3
 import os
 import datetime
 from sqlite3.dbapi2 import Timestamp
+from tokenize import group
 import pytz
 import urllib.request
 import json
 from hoshino import util
+import nonebot
 
-
-DB_PATH = os.path.expanduser('~/.hoshino/cbsimple.db')
+DB_PATH = os.path.expanduser('~/.hoshino/auto_clanbattle.db')
+#DB_PATH = os.path.expanduser('~/.hoshino/cbsimple.db')
 
 def get_boss_info():
     with urllib.request.urlopen("https://raw.githubusercontent.com/yoooowi/pcr_autocb/master/config.json") as url:
@@ -20,7 +23,6 @@ def get_boss_num(boss_list, boss_name):
         return boss_list[boss_name]
     else:
         return 0
-
 
 def pcr_date():
     now = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
@@ -50,13 +52,16 @@ class SqliteDao(object):
         # detect_types 中的两个参数用于处理datetime
         return sqlite3.connect(self._dbpath, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
 
+
+
 class SLDao(SqliteDao):
     def __init__(self):
         super().__init__(
             table='sl',
-            columns='uid, last_sl',
+            columns='uid, group_id, last_sl,',
             fields='''
-            uid INT PRIMARY KEY,
+            uid INT INT NOT NULL,
+            group_id INT NOT NULL,
             last_sl TIMESTAMP
             ''')
 
@@ -64,14 +69,14 @@ class SLDao(SqliteDao):
     # 0 -> 记录成功
     # 1 -> 当天已有SL记录
     # 2 -> 其它错误
-    def add_sl(self, uid):
+    def add_sl(self, uid, group_id):
         with self._connect() as conn:
             try:
-                ret = conn.execute("SELECT uid, last_sl FROM sl WHERE uid = ?", (uid,)).fetchone()
+                ret = conn.execute("SELECT uid, last_sl FROM sl WHERE uid = ? AND group_id = ?", (uid,group_id,)).fetchone()
 
                 # 该成员没有使用过SL
                 if not ret:
-                    conn.execute('INSERT INTO sl (uid, last_sl) VALUES (?, ?)', (uid, pcr_date()))
+                    conn.execute('INSERT INTO sl (uid, group_id, last_sl) VALUES (?, ?,?)', (uid, group_id, pcr_date(),))
                     return 0
 
                 last_sl = ret[1]
@@ -82,7 +87,7 @@ class SLDao(SqliteDao):
 
                 # 今天没有SL
                 else:
-                    conn.execute('UPDATE sl SET last_sl = ? WHERE uid = ?', (pcr_date(), uid))
+                    conn.execute('UPDATE sl SET last_sl = ? WHERE uid = ? AND group_id = ?', (pcr_date(), uid, group_id,))
                     return 0
 
             except (sqlite3.DatabaseError) as e:
@@ -91,10 +96,10 @@ class SLDao(SqliteDao):
     # 0 -> 没有SL
     # 1 -> 有SL
     # 2 -> Error
-    def check_sl(self, uid):
+    def check_sl(self, uid, group_id):
         with self._connect() as conn:
             try:
-                ret = conn.execute("SELECT uid, last_sl FROM sl WHERE uid = ?", (uid,)).fetchone()
+                ret = conn.execute("SELECT uid, last_sl FROM sl WHERE uid = ? AND group_id = ?", (uid,group_id,)).fetchone()
 
                 # 该成员没有使用过SL
                 if not ret:
@@ -113,32 +118,33 @@ class SLDao(SqliteDao):
             except (sqlite3.DatabaseError) as e:
                 raise
 
-
 # uid -1 是当前 BOSS
 class SubscribeDao(SqliteDao):
     def __init__(self):
         super().__init__(
             table='subscribe',
-            columns='uid, boss',
+            columns='uid, boss, group_id,',
             fields='''
             uid INT NOT NULL,
-            boss INT NOT NULL
+            boss INT NOT NULL,
+            group_id INT NOT NULL
             ''')
 
-    def init(self):
+    def init(self,group_id=None):
         with self._connect() as conn:
             try:
-                conn.execute("DELETE FROM subscribe where 1=1")
-                conn.execute("INSERT INTO subscribe (uid, boss) VALUES (-1, 1)")
+                conn.execute("DELETE FROM subscribe WHERE group_id = ?", (group_id,)).fetchone()
+                conn.execute("INSERT INTO subscribe (uid, boss,group_id) VALUES (-1, 1,?)",(group_id,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
+                print (e)
                 return 0
 
-    def curr_boss(self):
+    def curr_boss(self,group_id):
         with self._connect() as conn:
             try:
-                ret = conn.execute("SELECT boss FROM subscribe WHERE uid = ?", (-1,)).fetchone()
+                ret = conn.execute("SELECT boss FROM subscribe WHERE uid = ? AND group_id = ?", (-1,group_id,)).fetchone()
                 if not ret:
                     return None
                 return ret[0]
@@ -146,20 +152,29 @@ class SubscribeDao(SqliteDao):
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def get_subscriber(self, boss):
+    def get_subscriber(self, boss,group_id):
         with self._connect() as conn:
             try:
-                ret = conn.execute("SELECT DISTINCT uid FROM subscribe WHERE boss = ? AND uid <> -1", (boss,)).fetchall()
+                ret = conn.execute("SELECT DISTINCT uid FROM subscribe WHERE boss = ? AND uid <> -1 AND group_id = ?", (boss,group_id,)).fetchall()
                 return [r[0] for r in ret]
 
             except (sqlite3.DatabaseError) as e:
                 raise
-
     # 1 -> Success
     # 0 -> Fail
-    def clear_subscriber(self, boss=None):
-        sql = "DELETE FROM subscribe WHERE uid <> -1" if not boss else \
-            f"DELETE FROM subscribe WHERE boss = {boss} AND uid <> -1"
+    def clear_subscriber(self,boss=None,group_id=None):
+        sql = f"DELETE FROM subscribe WHERE uid <> -1 AND group_id = {group_id}" if not boss else \
+            f"DELETE FROM subscribe WHERE boss = {boss} AND uid <> -1 AND group_id = {group_id}"
+        with self._connect() as conn:
+            try:
+                conn.execute(sql)
+                return 1
+
+            except (sqlite3.DatabaseError) as e:
+                return 0
+    
+    def delete_subscriber(self,uid=None,boss=None,group_id=None):
+        sql =  f"DELETE FROM subscribe WHERE boss = {boss} AND uid = {uid} AND group_id = {group_id}"
         with self._connect() as conn:
             try:
                 conn.execute(sql)
@@ -168,19 +183,19 @@ class SubscribeDao(SqliteDao):
             except (sqlite3.DatabaseError) as e:
                 return 0
 
-    def add_subscribe(self, uid, boss):
+    def add_subscribe(self, uid, boss,group_id):
         with self._connect() as conn:
             try:
-                conn.execute("INSERT INTO subscribe (uid, boss) VALUES (?, ?) ", (uid, boss))
+                conn.execute("INSERT INTO subscribe (uid, boss,group_id) VALUES (?,?,?) ", (uid, boss,group_id,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
                 return 0
 
-    def update_boss(self, boss):
+    def update_boss(self, boss,group_id):
         with self._connect() as conn:
             try:
-                conn.execute("UPDATE subscribe SET boss=? WHERE uid = -1 ", (boss,))
+                conn.execute("UPDATE subscribe SET boss=? WHERE uid = -1 AND group_id =?", (boss,group_id,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
@@ -190,17 +205,18 @@ class RecordDao(SqliteDao):
     def __init__(self, start=None, end=None):
         super().__init__(
             table=f'records',
-            columns='name, time, boss, damage, flag',
+            columns='name, time, boss, damage, flag, group_id,',
             fields='''
             name VARCHAR(16) NOT NULL,
             time TIMESTAMP NOT NULL,
             lap INT NOT NULL,
             boss VARCHAR(16) NOT NULL,
             damage INT NOT NULL,
-            flag INT NOT NULL
+            flag INT NOT NULL,
+            group_id INT NOT NULL
             ''')
 
-    def add_record(self, records):
+    async def add_record(self, records,group_id):
         
         with self._connect() as conn:
             try:
@@ -218,18 +234,17 @@ class RecordDao(SqliteDao):
                         reimburse = record['reimburse']
                         reimburse <<= 1
                         flag = kill | reimburse
-
-                        conn.execute(f"INSERT INTO {self._table} VALUES (?,?,?,?,?,?)", (name, time, lap, boss, damage, flag))
+                        conn.execute(f"INSERT INTO {self._table} VALUES (?,?,?,?,?,?,?)", (name, time, lap, boss, damage, flag,group_id,))
                 return 1
                         
 
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def get_all_records(self):
+    def get_all_records(self,group_id):
         with self._connect() as conn:
             try:
-                result = conn.execute(f"SELECT name, time, lap, boss, damage, flag FROM {self._table}").fetchall()
+                result = conn.execute(f"SELECT name, time, lap, boss, damage, flag, group_id FROM {self._table} WHERE group_id = ?",(group_id,)).fetchall()
                 if not result:
                     return None
                 return [{'name':r[0], 'time':r[1], 'lap':r[2], 'boss':r[3], \
@@ -239,15 +254,16 @@ class RecordDao(SqliteDao):
                 raise
 
 
-    def get_day_rcords(self, date:datetime.datetime):
+
+    def get_day_rcords(self, date:datetime.datetime,group_id):
 
         date = date.replace(hour=5, minute=0, second=0, microsecond=0)
         tomorrow = date + datetime.timedelta(days=1)
 
         with self._connect() as conn:
             try:
-                result = conn.execute(f"SELECT name, time, lap, boss, damage, flag FROM {self._table} WHERE time BETWEEN ? AND ?", \
-                    (date, tomorrow)).fetchall()
+                result = conn.execute(f"SELECT name, time, lap, boss, damage, flag, group_id FROM {self._table} WHERE time BETWEEN ? AND ? AND group_id = ?", \
+                    (date, tomorrow,group_id)).fetchall()
                 if not result:
                     return None
                 return [{'name':r[0], 'time':r[1], 'lap':r[2], 'boss':r[3], \
@@ -256,14 +272,14 @@ class RecordDao(SqliteDao):
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def get_member_monthly_record(self, name, start):
+    def get_member_monthly_record(self, name, start,group_id):
         
         boss_list = get_boss_info()['boss_name']
 
         with self._connect() as conn:
             try:
-                result = conn.execute(f"SELECT name, time, lap, boss, damage, flag FROM {self._table} WHERE time > ? AND name = ? ORDER BY time", \
-                    (start, name)).fetchall()
+                result = conn.execute(f"SELECT name, time, lap, boss, damage, flag FROM {self._table} WHERE time > ? AND name = ? And group_id =? ORDER BY time", \
+                    (start, name,group_id,)).fetchall()
                 if not result:
                     return None
                 return [{'name':r[0], 'time':r[1], 'lap':r[2], 'boss':get_boss_num(boss_list, r[3]), \
@@ -277,30 +293,31 @@ class DailyDao(SqliteDao):
     def __init__(self):
         super().__init__(
             table='daily',
-            columns='month, date, rank, recordCount, totalScore, totalDamage',
+            columns='month, date, rank, recordCount, totalScore, totalDamage, group_id,',
             fields='''
             month INT NOT NULL,
             date TIMESTAMP NOT NULL,
             rank INT NOT NULL,
             recordCount INT NOT NULL,
             totalScore INT NOT NULL,
-            totalDamage INT NOT NULL
+            totalDamage INT NOT NULL,
+            group_id INT NOT NULL
             ''')
 
-    def add_day_report(self, month, date, rank, recordCount, totalScore, totalDamage):
+    def add_day_report(self, month, date, rank, recordCount, totalScore, totalDamage, group_id):
         with self._connect() as conn:
             try:
-                conn.execute("INSERT INTO daily VALUES (?,?,?,?,?,?)", \
-                    (month, date, rank, recordCount, totalScore, totalDamage))
+                conn.execute("INSERT INTO daily VALUES (?,?,?,?,?,?,?)", \
+                    (month, date, rank, recordCount, totalScore, totalDamage,group_id,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def get_day_report(self, date):
+    def get_day_report(self, date,group_id):
         with self._connect() as conn:
             try:
-                result = conn.execute("SELECT * FROM daily WHERE date = ?", (date,)).fetchone()
+                result = conn.execute("SELECT * FROM daily WHERE date = ? and group_id = ?", (date,group_id,)).fetchone()
                 if not result:
                     return None
                 return {'month': result[0], 'date': result[1], 'rank': result[2], \
@@ -313,28 +330,29 @@ class MemberDao(SqliteDao):
     def __init__(self):
         super().__init__(
             table='member',
-            columns='qqid, nickname',
+            columns='qqid, nickname, group_id,',
             fields='''
-            qqid INT PRIMARY KEY,
-            nickname VARCHAR(10) NOT NULL UNIQUE
+            qqid INT NOT NULL,
+            group_id INT NOT NULL,
+            nickname VARCHAR(10) NOT NULL
             ''')
 
     
-    def register(self, qqid, nickname):
+    def register(self, qqid, nickname,group_id):
         with self._connect() as conn:
             try:
-                conn.execute("INSERT INTO member VALUES (?,?)", \
-                    (qqid, nickname))
+                conn.execute("INSERT INTO member VALUES (?,?,?)", \
+                    (qqid, group_id,nickname,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def get_name_from_qq(self, qqid):
+    def get_name_from_qq(self, qqid,group_id):
         with self._connect() as conn:
             try:
-                result = conn.execute("SELECT nickname FROM member WHERE qqid = ?", \
-                    (qqid,)).fetchone()
+                result = conn.execute("SELECT nickname FROM member WHERE qqid = ? AND group_id = ?", \
+                    (qqid,group_id,)).fetchone()
                 if not result:
                     return None
                 return result[0]
@@ -343,11 +361,11 @@ class MemberDao(SqliteDao):
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def get_qq_from_name(self, qqid):
+    def get_qq_from_name(self, qqid,group_id):
         with self._connect() as conn:
             try:
-                result = conn.execute("SELECT qqid FROM member WHERE nickname = ?", \
-                    (qqid,)).fetchone()
+                result = conn.execute("SELECT qqid FROM member WHERE nickname = ? AND group_id = ?", \
+                    (qqid,group_id,)).fetchone()
                 if not result:
                     return None
                 return result[0]
@@ -356,21 +374,21 @@ class MemberDao(SqliteDao):
             except (sqlite3.DatabaseError) as e:
                 raise
     
-    def update_info(self, qqid, nickname):
+    def update_info(self, qqid, nickname,group_id):
         with self._connect() as conn:
             try:
-                conn.execute("UPDATE member SET nickname = ? WHERE qqid = ?", \
-                    (nickname, qqid))
+                conn.execute("UPDATE member SET nickname = ? WHERE qqid = ? AND group_id =?", \
+                    (nickname, qqid,group_id,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
                 raise
 
-    def leave(self, qqid):
+    def leave(self, qqid,group_id):
         with self._connect() as conn:
             try:
-                conn.execute("DELETE FROM member WHERE qqid = ?", \
-                    (qqid,))
+                conn.execute("DELETE FROM member WHERE qqid = ? AND group_id = ?", \
+                    (qqid,group_id,))
                 return 1
 
             except (sqlite3.DatabaseError) as e:
