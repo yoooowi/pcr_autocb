@@ -136,8 +136,10 @@ def get_boss_stage(lap_num):
         return (1, 'A')
     elif lap_num <= 10:
         return (2, 'B')
-    else:
+    elif lap_num <= 34:
         return (3, 'C')
+    else:
+        return (4, 'D')
 
 
 async def notify_subscribe(boss):
