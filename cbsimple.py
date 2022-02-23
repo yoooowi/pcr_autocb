@@ -491,6 +491,8 @@ async def refs(bot, ev):
 >>> http://t.cn/A6IRD7js
 三阶段作业
 >>> http://t.cn/A6cJ7to3
+四阶段作业
+>>> http://t.cn/A66vixUu
 分刀器
 >>> https://www.aikurumi.cn/'''
     await bot.send(ev, msg)
