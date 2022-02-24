@@ -1,9 +1,15 @@
-from distutils.log import debug
-from fileinput import filename
-from tkinter import W
-from .base import *
-from .data import SubscribeDao, RecordDao, DailyDao
+import datetime
+import pytz
+import nonebot
+from .cbsimple import *
+from .dao_multi import SubscribeDao, RecordDao, DailyDao, MemberDao
 from apscheduler.triggers.date import DateTrigger
+
+
+if multigroup:
+    from .dao_multi import SubscribeDao, RecordDao, DailyDao, MemberDao
+else:
+    from .dao import SubscribeDao, RecordDao, DailyDao, MemberDao
 
 subscirbe_text = {}
 start_date = None
@@ -43,7 +49,7 @@ async def get_today_stat(bot, ev):
 @sv.on_fullmatch('昨日出刀')
 async def get_yesterday_stat(bot, ev):
     group_id = ev.group_id
-    start_date, end_date = await get_start_end_date(group_id)
+    start_date, end_date = await get_start_end_date(ev.group_id)
     if not start_date or not end_date:
         await bot.send(ev, "未获取到会战期间")
         return
@@ -52,7 +58,7 @@ async def get_yesterday_stat(bot, ev):
     if date < start_date:
         await bot.send(ev, "昨天不是会战期间")
         return
-    await get_stat(bot, ev,group_id,date)
+    await get_stat(bot, ev, group_id, date)
 
 @sv.on_fullmatch('昨日日报')
 async def yesterday_report(bot, ev):
@@ -134,41 +140,24 @@ async def has_sl(bot, ev):
     else:
         await bot.send(ev, '数据库错误 请查看log')
 
-@sv.on_prefix('预约')
+@sv.on_rex(r'^预约\s?(\d)\s?(\S*)')
 async def subscirbe(bot, ev):
-    info = ev.raw_message
-    content = info.split()
-    lenC = len(content)
     group_id = ev.group_id
     uid = ev.user_id
-    if lenC == 1:
-        await bot.send(ev, '预约格式[预约]+[boss序号]+[要说的话，可不填],+表示空格', at_sender=True)
-    elif lenC == 2:
-        boss = int(content[1])
-        if boss > 5 or boss < 1:
-            await bot.send(ev, "不约，滚")
-            return
-        result = subDao.add_subscribe(uid, boss,group_id)
-        subscirbe_text[f'{uid}+{boss}+{group_id}'] = None
-        if result == 1:
-            if boss in (1, 2):
-                msg = '虽然我觉得它活不过一个状态更新周期，但还是给你预约上了'
-            else:
-                msg = '预约成功'
-            await bot.send(ev, msg, at_sender=True)
-    elif lenC == 3:
-        boss = int(content[1])
-        if boss > 5 or boss < 1:
-            await bot.send(ev, "不约，滚")
-            return
-        subscirbe_text[f'{uid}+{boss}+{group_id}'] = str(content[2])
-        result = subDao.add_subscribe(uid, boss,group_id)
-        if result == 1:
-            if boss in (1, 2):
-                msg = '虽然我觉得它活不过一个状态更新周期，但还是给你预约上了'
-            else:
-                msg = '预约成功'
-            await bot.send(ev, msg, at_sender=True)
+    match = ev['match']
+    boss = int(match.group(1))
+
+    if boss > 5 or boss < 1:
+        await bot.send(ev, "不约，滚")
+        return
+    result = subDao.add_subscribe(uid, boss,group_id)
+    subscirbe_text[f'{uid}+{boss}+{group_id}'] = match.group(2)
+    if result == 1:
+        if boss in (1, 2):
+            msg = '虽然我觉得会来不及通知你，但还是给你预约上了'
+        else:
+            msg = '预约成功'
+        await bot.send(ev, msg, at_sender=True)
     else:
         await bot.send(ev, '预约失败', at_sender=True)
 
@@ -242,7 +231,7 @@ async def climb_tree(bot, ev):
     uid = ev.user_id
     group_id = ev.group_id
 
-    if on_tree.get(group_id)== None:
+    if on_tree.get(group_id) is None:
         on_tree[group_id]=[]
 
     if uid in on_tree[group_id]:
@@ -261,7 +250,7 @@ async def climb_tree(bot, ev):
     trigger = DateTrigger(
         run_date=datetime.datetime.now() + datetime.timedelta(minutes=time)
     )
-    id = str(uid + group_id)
+    id = f"{uid}@{group_id}"
     nonebot.scheduler.add_job(
         func=send_tree_notification,
         trigger=trigger,
@@ -278,7 +267,7 @@ async def climb_tree(bot, ev):
 async def off_tree(bot, ev):
     uid = ev.user_id
     group_id = ev.group_id
-    if on_tree.get(group_id) != None:
+    if on_tree.get(group_id) is not None:
         if uid not in on_tree[group_id]:
             await bot.send(ev, "您似乎不在树上", at_sender=True)
             return
@@ -286,7 +275,7 @@ async def off_tree(bot, ev):
         await bot.send(ev, "您似乎不在树上", at_sender=True)
         return
 
-    id = str(uid+group_id)
+    id = f"{uid}@{group_id}"
     nonebot.scheduler.remove_job(id)
     on_tree[group_id].remove(uid)
     sv.logger.info(f"{uid}主动下树")
@@ -313,8 +302,7 @@ async def check_tree(bot: HoshinoBot, ev):
 
 @sv.on_fullmatch('更新boss列表')
 async def update_boss_list(bot, ev):
-    group_id = ev.group_id
-    data = await get_boss_list(group_id)
+    data = await get_boss_list(ev.group_id)
     if not data or len(data) == 0:
         sv.logger.error('API访问失败@update_boss_list')
     elif 'data' not in data or len(data['data']) == 0:
@@ -466,15 +454,16 @@ async def find_qq_by_name(bot, ev):
 # 手动获取时间
 @sv.on_fullmatch('gettime')
 async def gettime(bot, ev):
-    group_id = ev.group_id
     global start_date, end_date
-    start_date, end_date = await get_start_end_date(group_id)
+    start_date, end_date = await get_start_end_date(ev.group_id)
     await bot.send(ev, f"当期{start_date}-{end_date}")
     if start_date and end_date:
         return 1
     else:
         return 0
 
+
+#TODO 同时初始化所有群
 # 手动初始化
 @sv.on_fullmatch('init', only_to_me=True)
 async def init(bot, ev):
@@ -523,14 +512,19 @@ async def cuidao(bot,ev):
             await bot.send_group_msg(group_id=group_id, message=msg)
 
 
-#auto
+
+
+################################
+##            AUTO            ##
+################################
+
 delta = datetime.timedelta(minutes=5)
 trigger = DateTrigger(
     run_date=datetime.datetime.now() + delta
 )
 
 # 启动后获取一次 start_date 和 end_date
-run_time = datetime.datetime.now() + datetime.timedelta(seconds=30)
+run_time = datetime.datetime.now() + datetime.timedelta(seconds=15)
 
 @sv.scheduled_job('date', run_date=run_time)
 async def gettime_on_start():
@@ -541,7 +535,7 @@ async def gettime_on_start():
     sv.logger.log(AUTO_LOG_LEVEL, f"获取工会战期间成功：{start_date}:{end_date}@gettime_on_start")
 
 # 每天获取一次 start_date 和 end_date
-@sv.scheduled_job('cron', hour=5, minute=5)
+@sv.scheduled_job('cron', hour=9)
 async def update_start_end_time():
     global start_date, end_date
     group_ids = groupids()
@@ -575,8 +569,6 @@ async def update():
 @sv.scheduled_job('interval', minutes = 2)
 async def bossupdater():
     now_date = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d')
-    group_ids = groupids()
-    start_date, end_date = await get_start_end_date(group_ids[0])
     if not start_date or not end_date or now_date < start_date or now_date > end_date:
         pass # 不在会战期间
     

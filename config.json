@@ -1,1 +1,16 @@
-{"groupids": [], "boss_name": {"双足飞龙": 1, "雷雷": 2, "海龙": 3, "暗黑独角兽": 4, "托尔佩顿": 5}}
+{
+    "multigroup": false,
+    "group": 0,
+    "cookie": {
+        "session-api": "Fill your token here ONLY IF multigroup is FALSE"
+    },
+
+    "groupids": ["Fill your group numbers here if multigroup is TRUE"], 
+    "boss_name": {
+        "双足飞龙": 1, 
+        "雷雷": 2, 
+        "海龙": 3, 
+        "暗黑独角兽": 4, 
+        "托尔佩顿": 5
+        }
+    }

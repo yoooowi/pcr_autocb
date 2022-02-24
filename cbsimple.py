@@ -3,17 +3,31 @@ import json
 import hoshino
 import aiohttp
 import traceback
+import nonebot
 from hoshino import HoshinoBot, Service, util, priv, MessageSegment
-from .data import *
 import base64
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 sv = Service('auto_clanbattle', enable_on_default=True, visible=True)
 
+send_long_msg_as_pic = True
+
+#模式
+g_config = util.load_config(__file__)
+try:
+    multigroup = g_config['multigroup']
+except:
+    multigroup = False
+
+if multigroup:
+    from .dao_multi import SubscribeDao, SLDao, RecordDao, DailyDao, MemberDao
+else:
+    from .dao import SubscribeDao, SLDao, RecordDao, DailyDao, MemberDao
 slDao = SLDao()
 subDao = SubscribeDao()
-send_long_msg_as_pic = True
+
+
 #群组
 group_ids = []
 #挂树
@@ -40,10 +54,18 @@ def load_group_config(group_id: str) -> int:
 
 
 def cookie(group_id):
-    return load_group_config(group_id)["cookie"]
+    if multigroup:
+        return load_group_config(group_id)["cookie"]
+    else:
+        return util.load_config(__file__)["cookie"]
+
 
 def groupids():
-    group_ids = util.load_config(__file__)['groupids']
+    global group_ids
+    if multigroup:
+        group_ids = g_config['groupids']
+    else:
+        group_ids = [g_config['group']]
     return group_ids
 
 def get_boss_info():
@@ -85,7 +107,14 @@ async def get_boss_list(group_id):
         traceback.print_exc()
     return None
 
-async def get_start_end_date(group_id):
+async def get_start_end_date(group_id=None):
+    if not group_id:
+        if len(group_ids) > 0:
+            group_id = groupids[0]
+        else:
+            sv.logger.error("群列表为空！")
+            return (None, None)
+            
     data = await get_collect(group_id)
     if not data or len(data) == 0:
         sv.logger.error('API访问失败@get_start_end_date')
@@ -117,7 +146,7 @@ async def update_boss(boss, lap_num, group_id, send_msg=False):
             if len(on_tree[group_id]) > 0:
                 off_tree_msg = "以下成员将自动下树：\n"
                 for uid in on_tree[group_id]:
-                    nonebot.scheduler.remove_job(str(uid))
+                    nonebot.scheduler.remove_job(f"{uid}@{group_id}")
                     off_tree_msg += f'[CQ:at,qq={uid}]'
                     sv.logger.info(f"{uid}因boss被击败下树")
                 on_tree.clear(group_id)
