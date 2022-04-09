@@ -193,7 +193,7 @@ async def get_stat(bot, ev, date=None):
         if len(data) == 0:
             await bot.send(ev, f"{'今日' if not date else date}没有出刀记录")
             return
-        stat = {3: [], 2.5: [], 2: [], 1.5: [], 1: [], 0.5: [], 0: []}
+        stat = {4: [],3: [], 2.5: [], 2: [], 1.5: [], 1: [], 0.5: [], 0: []}
 
         reply = []
         reply.append(f"以下是{'今日' if not date else date}的出刀次数统计：")
