@@ -7,7 +7,6 @@ import asyncio
 import traceback
 
 from hoshino import Service, priv
-from .cbsimple import *
 from .dao import SubscribeDao, RecordDao, DailyDao
 from apscheduler.triggers.date import DateTrigger
 
@@ -77,6 +76,7 @@ async def init(bot, ev):
     else:
         await bot.send(ev, "预约表重置失败")
     await update_boss_list(bot, ev)
+    await initIndexDict()
 
 @sv.scheduled_job('interval', minutes = 2)
 async def bossupdater():
@@ -86,6 +86,7 @@ async def bossupdater():
     
     else:
         await update()
+        await updateNewDao()
 
 @sv.scheduled_job('cron', hour = 4, minute=58)
 async def get_daily_report():
@@ -103,6 +104,7 @@ async def auto_record():
         pass # 不在会战期间
     
     else:
+        await initIndexDict()
         await get_record()
 
 @sv.scheduled_job('cron', hour = 0, minute = 10)
@@ -205,6 +207,108 @@ async def update():
         lap = boss_info['lap_num']
         await update_boss(boss, lap, send_msg=True)
 
+def format_number(number: int) -> str:
+    if number == 0:
+        return '0'
+    num_str = ''
+    if number > 100000000: #亿
+        yi = number // 100000000
+        number %= 100000000
+        if yi != 0:
+            num_str += f'{yi}亿'
+    if number > 10000:
+        wan = number // 10000
+        number %= 10000
+        if wan != 0:
+            num_str += f'{wan}万'
+    if number != 0:
+        num_str += f'{number}'
+    return num_str
+
+def save_config(data):
+    """
+    Just use `config = load_config(__file__)`,
+    you can get the config.json as a dict.
+    """
+    filename = os.path.join(os.path.dirname(__file__), 'config.json')
+    try:
+        with open(filename,'w',encoding='utf8') as f:
+            config = json.dump(data,f,ensure_ascii=False)
+            return True
+    except Exception as e:
+        hoshino.logger.exception(e)
+        return False
+
+async def initIndexDict():
+    configDict = util.load_config(__file__)
+    
+    data = None
+    fail_count = 0
+    while fail_count < 3 and not data:
+        data = await get_today_data()
+        fail_count += 1
+
+    if not data or len(data) == 0:
+        sv.logger.error('API访问失败@auto_record')
+    elif 'data' not in data or len(data['data']) == 0:
+        sv.logger.error('API数据异常@auto_record')
+    else:
+        data = data['data']
+
+    for member in data:
+        name = member['name']
+        configDict['index'][name] = len(member['damage_list'])
+    save_config(configDict)
+
+async def updateNewDao():
+    date = (datetime.datetime.now(pytz.timezone('Asia/Shanghai')) - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+    data = None
+    fail_count = 0
+
+    while fail_count < 3 and not data:
+        data = await get_today_data()
+        fail_count += 1
+
+    if not data or len(data) == 0:
+        sv.logger.error('API访问失败@auto_record')
+    elif 'data' not in data or len(data['data']) == 0:
+        sv.logger.error('API数据异常@auto_record')
+    else:
+        configDict = util.load_config(__file__)
+        indexDict = configDict['index']
+        new_challenges = []
+        data = data['data']
+        for member in data:
+            name = member['name']
+            personIndex = indexDict[name]
+            recordLength = len(member['damage_list'])
+            if recordLength > personIndex:
+                sortRecord = sorted(member['damage_list'],key=lambda item:item["datetime"]) # 每个人的出刀数据按时间排序，并存入新的列表中
+                for i in sortRecord[personIndex:]:
+                    i["name"] = name
+                    new_challenges.append(i) # 将新增的出刀数据加入列表
+                    indexDict[name] = recordLength # 更新 个人index
+        configDict['index'] = indexDict
+        save_config(configDict)
+        try:
+            for item in new_challenges:
+                msg = "新增出刀记录:"
+                dt = datetime.datetime.fromtimestamp(item['datetime'])
+                msg += f"\n{dt.strftime('%Y/%m/%d %H:%M:%S')} "
+                msg += f"{item['lap_num']}周目 "
+                msg += f"{item['boss_name']}\n"
+                msg += f"{item['name']} "
+                msg += f"伤害:{format_number(item['damage'])} "
+                if item['kill'] == 1:
+                    msg += "尾刀"
+                if item['reimburse'] == 1:
+                    msg += "补偿刀"
+                bot = nonebot.get_bot()
+                await bot.send_group_msg(group_id=group_id, message=msg)    
+            sv.logger.log(AUTO_LOG_LEVEL, f'截至 {date} 的出刀已发送')
+        except Exception as e:
+            bot = nonebot.get_bot()
+            sv.logger.error('出刀记录发送失败')
 
 # @sv.scheduled_job('cron', hour='0', minute='5')
 async def cuidao():
@@ -235,4 +339,3 @@ async def set_log_flag(bot, ev):
     global log_flag
     log_flag = True
     await bot.send(ev, 'OK')
-
